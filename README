@@ -13,11 +13,11 @@ DESCRIPTION
     display it.
 
 AUTHOR
-       Copyright 1994-2004 by Andras Salamon <andras@dns.net>.
+    Copyright 1994-2004 by Andras Salamon <andras@dns.net>.
 
 AVAILABILITY
-       The latest version of zsu is available from
-       http://www.dns.net/dist/zsu/ and also from CPAN, at
-       /authors/id/A/AZ/AZS/zsu/ and in
-       http://www.cpan.org/scripts/Networking/ .
+    The latest version of zsu is available from
+    http://www.dns.net/dist/zsu/ and also from CPAN, at
+    http://www.cpan.org/authors/id/A/AZ/AZS/zsu/ and in
+    http://www.cpan.org/scripts/Networking/ .
 
