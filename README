@@ -1,200 +1,23 @@
 NAME
-       zsu - update serial numbers in DNS zone files
+    zsu - update serial numbers in DNS zone files
 
 SYNOPSIS
-       zsu [-cdfhLv] zone ...
-
-README
-       zsu updates serial numbers in DNS zone files.
+    zsu [-cdfhLnv] zone ...
 
 DESCRIPTION
-       After any changes are made to a DNS zone file, the serial
-       number must be increased -- otherwise changes will not
-       propagate to the slave servers (secondaries).  zsu handles
-       the serial number update automatically, while preserving
-       everything else in the file.
-
-       Forgetting to increase the serial number is one of the
-       most common causes of hair loss among DNS administrators!
-
-       Introduction
-
-       zsu expects one or more zonefile names as arguments.  The
-       command
-	   zsu /etc/db.local 0.0.127.in-add.arpa
-       /var/named/db.example.com will update the serial numbers
-       in each of the three zone files listed.
-
-       zsu is most commonly used as part of a revision control
-       system for zone files, just before changes are committed
-       to a repository.	 The following simple script demonstrates
-       this.  The script expects a single zonefile name as an
-       argument, and relies on ci/co/rcsdiff (all parts of RCS,
-       from ftp://ftp.cs.purdue.edu/pub/RCS/ ):
-
-	   #!/bin/sh
-	   co -l $1
-	   vi $1
-	   rcsdiff -q $1 > /dev/null
-	   if [ ! $? ]; then
-	       zsu -cf $1
-	       ci -u $1
-	   fi
-
-       zsu will ignore zone files where the originating host in
-       the "SOA" record does not match the local hostname.  Use
-       the -f option to override this check.
-
-       Details
-
-       zsu works with the standard "YYYYMMDDNN" serial number
-       format, which is derived from the current date and a
-       counter to distinguish multiple changes made the same day.
-       zsu tries very hard to increase the serial number while
-       keeping its format.  zsu works with 2 or 4 digit years and
-       1 or 2 digit counters, so it will also try to work with
-       formats "YYMMDDN", "YYYYMMDDN" and "YYMMDDNN".
-
-       Other formats are currently not dealt with, and zsu will
-       skip zone files containing serial numbers in such formats.
-       Unsupported formats include YYYYMMDDmm, where mm is time
-       since midnight expressed in 15-minute units, or good old
-       NNNN flat integer counters.  I could add support for
-       YYYYMMDDmm if there is demand.  NNNN format counters are
-       not dealt with since they usually indicate that some kind
-       of DNS management system is in place, and most such
-       systems want to manage the serial numbers themselves.
-
-       zsu understands standard zonefile syntax and will attempt
-       to change the first SOA record found in each of the zones
-       specified.  zsu will silently ignore zone files which do
-       not appear to be for the local host to prevent changes to
-       zone files on slave servers.  Use the -f option to force
-       updates even if the origin in the SOA record fails to
-       match the hostname as determined by zsu.
-
-       When the serial number indicates a date in the future, zsu
-       will continue to use the future date, as long as the
-       counter can still be incremented while retaining the date
-       format.  In verbose mode, a warning is issued when
-       encountering such a timewarp.  In a future release, serial
-       number wraparound (see RFC 1982) may be supported to help
-       fix inadvertent timewarps.
-
-       Use the -c option to allow zsu to change the format when
-       necessary (by default zsu will just complain about these
-       situations).  Changing the format is necessary if using
-       two-digit years and the century has changed, or if
-       YYMMDDNN format is used and NN is 99, or if a 1 digit
-       counter has reached 9.
-
-OPTIONS
-       -c    Change serial number format if necessary (otherwise
-       will simply warn about overflow and similar errors, and
-       leave the zone file intact). Do not use -c if other
-       programs rely on the serial format!
-
-       -d    Print debugging information.
-
-       -f    Force update, even if this host is not SOA origin.
-
-       -h    Display a brief help message.
-
-       -L    Show the software license.
-
-       -v    Verbose mode.  Show the progress of the program.
-
-PREREQUISITES
-       You need Perl installed.	 See http://www.perl.org/ for
-       details.	 The latest versions have been tested with perl
-       5.005_03 but should also work with other 5.x versions
-       (including 5.6.1) and with perl 4.036.  There may be a
-       problem with the dependency on "getopts.pl" under 5.8.x,
-       this is awaiting confirmation.
-
-EXAMPLES
-       The first few lines of a zone file will typically look
-       something like:
-
-	   ; some comments
-	   @ IN SOA myhost.example.com. hostmaster.example.com. (
-	     1998021503 ; the serial number
-	     28800 ; refresh
-
-       If the system date was 12 August 2001 and you updated the
-       zone with zsu, this snippet would end up as:
-
-	   ; some comments
-	   @ IN SOA myhost.example.com. hostmaster.example.com. (
-	     2001081200 ; the serial number
-	     28800 ; refresh
-
-       Here is a table of what would be done to some other serial
-       numbers, if the system date was 12 August 2001:
-
-	   original	   zsu			   zsu -c
-	   -----------	   ----------------	   ----------------
-	   9712231	   9712232		   9712232
-	   97122301	   97122302		   97122302
-	   199712231	   199712232		   199712232
-	   1997122301	   1997122302		   1997122302
-	   9712239	   warn: no change	   200108120
-	   97122399	   warn: no change	   2001081200
-	   199712239	   warn: no change	   200108120
-	   1997122399	   warn: no change	   2001081200
-	   0108129	   warn: no change	   01081210
-	   01081299	   warn: no change	   2001081200
-	   200108129	   warn: no change	   2001081210
-	   2001081299	   warn: no change	   warn: no change
-
-
-BUGS
-       The hostname checking in zsu is known to be buggy; for
-       instance it will fail to produce a warning if it needs a
-       domain name, but domainname returns just whitespace.
-
-       Please report other programming errors to me.
-
-SEE ALSO
-       named(8)
+    After any changes are made to a DNS zone file, the serial number
+    must be increased -- otherwise changes will not propagate to
+    the slave servers (secondaries).  zsu handles the serial number
+    update automatically, while preserving everything else in the file.
+    Full documentation is included in pod format, 'pod2text zsu' will
+    display it.
 
 AUTHOR
-       Copyright 1994-2004 Andras Salamon "<andras@dns.net>".
-
-HISTORY
-       Version 1.17 moved to POD documentation.
-
-       Version 1.16 renamed the README.zsu file to README, and
-       fixed the availability information.
-
-       Version 1.15 fixed handling of "SOA" records where the
-       serial is on the same line as the "SOA" tag.  Thanks to
-       Frederic Marchand for picking up the problem and
-       suggesting a solution.  Single line "SOA" records now also
-       don't require parentheses, as per RFC 1034.
-
-       Version 1.14 added documentation fixes, moved the
-       distribution location, and noted where to get zsu in the
-       documentation.
-
-       Version 1.13 fixed various problems with 2-digit year and
-       1-digit counter formats.	 zsu is now able to change the
-       format when appropriate, ie. when the century has changed,
-       or if "YYMMDDNN" format is used and "NN" is 99, or if a 1
-       digit counter has reached 9.
-
-       The -c option is new; previously the serial number format
-       was silently changed when necessary.  Use -c for the old
-       behaviour.
+       Copyright 1994-2004 by Andras Salamon <andras@dns.net>.
 
 AVAILABILITY
        The latest version of zsu is available from
        http://www.dns.net/dist/zsu/ and also from CPAN, at
        /authors/id/A/AZ/AZS/zsu/ and in
-       http://www.cpan.org/scripts/Networking/ (coming soon).
-
-SCRIPT CATEGORIES
-	   Networking
-	   VersionControl/CVS
-	   Unix/System_administration
+       http://www.cpan.org/scripts/Networking/ .
 

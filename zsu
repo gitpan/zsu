@@ -1,5 +1,5 @@
-#!/usr/bin/perl -wi
-( $IDENT = '@(#)zsu: update DNS zone serial number' ) =~ s/^[^:]*: *//;
+#!/usr/bin/perl -i
+( my $IDENT = '@(#)zsu: update DNS zone serial number' ) =~ s/^[^:]*: *//;
 #
 # edit zone file in-place
 # only update files where the SOA indicates we are authoritative
@@ -16,7 +16,7 @@ B<zsu> - update serial numbers in DNS zone files
 
 =head1 SYNOPSIS
 
-B<zsu> [B<-cdfhLv>] I<zone> ...
+B<zsu> [B<-cdfhLnv>] I<zone> ...
 
 =head1 README
 
@@ -94,6 +94,8 @@ the format is necessary if using two-digit years and the century has
 changed, or if YYMMDDNN format is used and NN is 99, or if a 1 digit
 counter has reached 9.
 
+Specify B<-cn> to convert from plain integer serial numbers to YYYYMMDDN.
+
 =head1 OPTIONS
 
 =over 6
@@ -101,7 +103,9 @@ counter has reached 9.
 =item B<-c>	
 Change serial number format if necessary (otherwise will simply warn
 about overflow and similar errors, and leave the zone file intact).
-Do not use B<-c> if other programs rely on the serial format!
+In conjunction with the B<-c> option, convert integer serial numbers
+to YYYYMMDDN format.  Do not use B<-c> if other programs rely on the
+serial format!
 
 =item B<-d>	
 Print debugging information.
@@ -115,6 +119,11 @@ Display a brief help message.
 =item B<-L>	
 Show the software license.
 
+=item B<-n>	
+Treat the serial number as a plain integer, and increment it.  Take care
+with this option if zone files are generated automatically, for instance
+from a database!
+
 =item B<-v>	
 Verbose mode.  Show the progress of the program.
 
@@ -123,10 +132,9 @@ Verbose mode.  Show the progress of the program.
 =head1 PREREQUISITES
 
 You need Perl installed.  See F<http://www.perl.org/> for details.
-The latest versions have been tested with perl 5.005_03 but should also
-work with other 5.x versions (including 5.6.1) and with perl 4.036.
-There may be a problem with the dependency on C<getopts.pl> under 5.8.x;
-this is awaiting confirmation.
+Latest versions have been tested with perl 5.005_03 but should also
+work with other 5.x versions (including 5.6.1).  Versions up to 1.18
+were compatible with perl 4, but later versions require perl 5.
 
 =head1 EXAMPLES
 
@@ -163,6 +171,14 @@ if the system date was 12 August 2001:
     200108129       warn: no change         2001081210
     2001081299      warn: no change         warn: no change
 
+    original        zsu -cn                 zsu -n
+    -----------     ----------------        ----------------
+    837             200108120               838
+    203456789       2001081200              203456790
+    1034567890      2001081200              1034567891
+    2147483646      warn: no change         2147483647
+    2147483647      warn: no change         warn: no change
+
 =head1 BUGS
 
 The hostname checking in B<zsu> is known to be buggy; for instance it will
@@ -180,6 +196,11 @@ named(8)
 Copyright 1994-2004 Andras Salamon C<E<lt>andras@dns.netE<gt>>.
 
 =head1 HISTORY
+
+Version 1.19 now requires Perl 5, added -n option, changed warnings to
+use NN instead of nn and (YY)YY instead of (yy)yy.
+
+Version 1.18 supports dates in the future.
 
 Version 1.17 moved to POD documentation.
 
@@ -207,7 +228,7 @@ changed when necessary.  Use B<-c> for the old behaviour.
 The latest version of B<zsu> is available from
 F<http://www.dns.net/dist/zsu/> and also from
 I<CPAN>, at F</authors/id/A/AZ/AZS/zsu/> and in
-F<http://www.cpan.org/scripts/Networking/> (coming soon).
+F<http://www.cpan.org/scripts/Networking/> .
 
 =head1 SCRIPT CATEGORIES
 
@@ -221,19 +242,21 @@ Unix/System_administration
 # internal variables
 #---------------------------------
 
-( $BCMD = $0 ) =~ s/.*\///;
-( $REVISION ) = ( '$Revision: 1.18 $' =~ /[^\d\.]*([\d\.]*)/ );
-$HELPSTRING = "For help, type: $BCMD -h";
+( my $BCMD = $0 ) =~ s/.*\///;
+( my $REVISION ) = ( '$Revision: 1.19 $' =~ /[^\d\.]*([\d\.]*)/ );
+my $HELPSTRING = "For help, type: $BCMD -h";
 
-$USAGE = "Usage: $BCMD [-cdfhLv] zone ...";
-$exitcode = 0;
+my $USAGE = "Usage: $BCMD [-cdfhLv] zone ...";
+my $exitcode = 0;
 
 
 # parse command line arguments
 #-----------------------------
-require 'getopts.pl';
-$opt_c = $opt_d = $opt_f = $opt_h = $opt_L = $opt_v = '';
-if ( ! &Getopts('cdfhLv') ) {
+use Getopt::Std;
+use vars qw( $opt_c $opt_d $opt_f $opt_h $opt_L $opt_n $opt_v );
+use strict;
+
+if (! &getopts('cdfhLnv')) {
     print STDERR "$USAGE\n$HELPSTRING\n";
     exit 2;
 }
@@ -246,12 +269,14 @@ Update serial number of DNS zone file using (YY)YYMMDDN(N) format convention.
  -d			print debugging information
  -f			force update, even if this host is not SOA origin
  -L			display software license
+ -n			treat serial number as a plain integer
  -v			turn on verbose mode
  zone ...		DNS zone files to update
 Default is to preserve the serial format and issue warnings when trying
 to update (YY)YYMMDD9 or if 99MMDDN(N) was last century.  Use -c to
 allow format changes in these situations instead.  Do not use -c if
-other programs rely on the serial format!
+other programs rely on the serial format!  Specify -cn to convert from
+NNNN style serial numbers to YYYYMMDDN.
 
 Zones are skipped if the SOA origin does not match the local hostname;
 use -f to force updates regardless.
@@ -277,8 +302,8 @@ EOT
 EOT
 	exit 0;
 }
-$VERBOSE = $opt_v || $DEBUG;
-$DEBUG = $opt_d;
+my $DEBUG = $opt_d;
+my $VERBOSE = $opt_v || $DEBUG;
 if ( @ARGV < 1 ) {
     print STDERR "$USAGE\n$HELPSTRING\n";
     exit 2;
@@ -289,6 +314,8 @@ if ( @ARGV < 1 ) {
 #---------------------------------
 # zone files must have originating host fully qualified, since information
 # from outside zone may be necessary to understand non-FQ domain names
+
+my ( $myhost, $mydom );
 if ( ! $opt_f ) {
     ( $myhost = `hostname` || `uname -n` ) =~ s/\s*$//;
     if ( $myhost !~ /\./ ) {
@@ -310,8 +337,8 @@ if ( ! $opt_f ) {
 # warn about converting N to NN format
 #----------------------------------
 sub bump {
-    local( $o_count ) = ( @_ );
-    warn "$ARGV: converting to nn format serial" if $VERBOSE
+    my $o_count = shift;
+    warn "$ARGV: converting to NN format serial" if $VERBOSE
 	&& $o_count eq '9' && $opt_c;
     $o_count + 1;
 }
@@ -321,16 +348,54 @@ sub bump {
 #
 # try to use today's date as returned by ctime(3)
 # update count if serial has today's date already
-# preserve yy format if used
+# preserve YY format if used
 # needs to detect RFC 1982 2^31 hack!
 #----------------------------------
 
 sub generate_new {
-    local( $o_serial ) = ( @_ );
+    my $o_serial = shift;
+
+    my ( $mday, $mon, $year ) = ( localtime( time ) )[3..5];
+    $mon ++; # change 0..11 to 1..12
+    $year += 1900 if $year < 1000; # fix 1900-offset years
+    printf STDERR "local date: %04d/%02d/%02d\n",
+	$year, $mon, $mday if $DEBUG;
+
+    # default is to generate new YYYY format date with 0 counter
+    my $n_y = $year % 100;
+    my $n_c = ( $year - $n_y ) / 100;
+    my $n_date = sprintf "%02d%02d%02d", $n_y, $mon, $mday;
+    my $n_serial = $o_serial;
+
+    # numeric format
+    if ( $opt_n ) {
+	if ( $opt_c ) { # change to YYYYMMDDN format
+	    $n_serial = sprintf "%s%06d0", $n_c, $n_date;
+	    if ( $n_serial <= $o_serial ) { # try ...NN format
+		$n_serial .= '0';
+		if ( $n_serial le $o_serial ) {
+		    warn "$ARGV: cannot convert $o_serial to YYYYMMDDNN format, leaving as is";
+		    $n_serial = $o_serial;
+		    $exitcode ++;
+		}
+	    }
+	} else { # keep numeric format, just increment
+	    if ( $o_serial eq '2147483647' ) { # avoid integer overflow
+		warn "$ARGV: cannot increment $o_serial, leaving as is";
+		$exitcode ++;
+	    } else {
+		$n_serial = $o_serial + 1;
+		my $len = length $o_serial;
+		$len = length $n_serial if $len < length $n_serial;
+		$n_serial = sprintf "%0*d", $len, $n_serial;
+	    }
+	}
+	return $n_serial;
+    }
 
     $n_serial = $o_serial;
     # note assumption that years are in range [1900, 2199]
-    ( $o_c, $o_y, $o_m, $o_d, $o_count ) = ( $o_serial =~
+    my ( $o_c, $o_y, $o_m, $o_d, $o_count ) = ( $o_serial =~
 	/^(19|20|21)?(\d\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(\d\d?)$/ );
 
     unless ( defined $o_y && defined $o_m && defined $o_d
@@ -338,46 +403,37 @@ sub generate_new {
 	warn "$ARGV: serial $o_serial does not match heuristics, leaving as is";
 	$exitcode ++;
     } else {
-	$o_date = $o_y.$o_m.$o_d;
+	my $o_date = $o_y.$o_m.$o_d;
 	$o_c = '' unless defined $o_c;
-	( $mday, $mon, $year ) = ( localtime( time ) )[3..5];
-	$mon ++; # change 0..11 to 1..12
-	$year += 1900 if $year < 1900; # fix 1900-offset years
-	printf STDERR "local date: %04d/%02d/%02d\n",
-	    $year, $mon, $mday if $DEBUG;
 
-	# default is to generate new yyyy format date with 0 counter
-	$n_y = $year % 100;
-	$n_c = ( $year - $n_y ) / 100;
-	$n_date = sprintf "%02d%02d%02d", $n_y, $mon, $mday;
-	$n_count = 0;
+	my $n_count = 0;
 
 	# two cases: check if counter can be bumped, if necessary
 	if ( ( $o_count =~ /\d\d/ && $o_count < 99 ) ||
 		( $o_count =~ /^\d$/ && ( $o_count < 9 || $opt_c ) ) ) {
 	    print STDERR "can bump serial\n" if $DEBUG;
-	    # try to keep yy format dates, if currently being used
+	    # try to keep YY format dates, if currently being used
 	    if ( $o_c eq '' ) {
-		print STDERR "currently using yy format dates\n" if $DEBUG;
+		print STDERR "currently using YY format dates\n" if $DEBUG;
 		if ( $n_date > $o_date ) {
-		    print STDERR "keeping yy format\n" if $DEBUG;
+		    print STDERR "keeping YY format\n" if $DEBUG;
 		    $n_c = $o_c;
 		} elsif ( $n_date == $o_date ) {
-		    print STDERR "keeping yy format, bumping count\n"
+		    print STDERR "keeping YY format, bumping count\n"
 			if $DEBUG;
 		    ( $n_c, $n_count ) = ( $o_c, bump( $o_count ) );
 		} else {
 		    if ( $opt_c ) {
-			warn "$ARGV: converting to yyyy format serial"
+			warn "$ARGV: converting to YYYY format serial"
 			    if $VERBOSE;
 		    } else {
-			warn "$ARGV: need -c to convert $o_serial to yyyy format, leaving as is";
+			warn "$ARGV: need -c to convert $o_serial to YYYY format, leaving as is";
 			( $n_c, $n_date, $n_count )  =
 				    ( $o_c, $o_date, $o_count );
 			$exitcode ++;
 		    }
 		}
-	    } else { # already using yyyy format
+	    } else { # already using YYYY format
 		if ( $n_c.$n_date < $o_c.$o_date ) {
 		    # should use 2^31 hack here, see RFC 1982
 		    # for now, keep future date and bump count
@@ -387,9 +443,9 @@ sub generate_new {
 		    ( $n_c, $n_date, $n_count )  =
 			    ( $o_c, $o_date, bump( $o_count ) );
 		} elsif ( $n_c.$n_date == $o_c.$o_date ) {
-		    print STDERR "yyyy format, bumping count\n" if $DEBUG;
+		    print STDERR "YYYY format, bumping count\n" if $DEBUG;
 		    $n_count = bump( $o_count );
-		} # else use yyyy format
+		} # else use YYYY format
 	    }
 	} else { # can't bump counter
 	    if ( $n_c.$n_date <= $o_c.$o_date ) {
@@ -399,7 +455,7 @@ sub generate_new {
 		( $n_c, $n_date, $n_count )  =
 			    ( $o_c, $o_date, $o_count );
 		$exitcode ++;
-	    } # else use yyyy format
+	    } # else use YYYY format
 	}
 	$n_serial = sprintf "%s%06d%0*d",
 	    $n_c, $n_date, ( ( $o_count =~ /^\d$/ ) ? 1 : 2 ), $n_count;
@@ -415,24 +471,24 @@ sub generate_new {
 # state table:	0 looking for SOA
 #		1 found SOA, looking for serial
 #		2 found serial, looking for next file
-$state = 0;
+my $state = 0;
 while ( <> ) {
     if ( $state == 0 ) {
 	# ... SOA zone_origin  zone_contact ( serial  ...
 	# ^ $1    ^ $2       ^ $3             ^ $4  ^ $5
 	# $4 will be '' if serial is on subsequent line, see state1
 	if ( /^([^;]*\bSOA\b\s+)([^\s;]+)(\s+[^\s;]+\s+\(?\s*)([^\s;]*)(.*)/i ) {
+	    my $ours = 0;
 	    if ( $opt_f || ( $2 eq $myhost ) ) {
 		$ours = 1;
 	    } else {
-		$ours = 0;
 		$state = 2;
 	    }
 	    if ( $ours ) {
 		if ( "$4" ne '' ) {
-		    $before_serial = $1 . $2 . $3;
-		    $o_serial = $4;
-		    $after_serial = $5;
+		    my $before_serial = $1 . $2 . $3;
+		    my $o_serial = $4;
+		    my $after_serial = $5;
 		    if ( $o_serial !~ /^[\d.]+$/ ) {
 			warn "$ARGV: cannot parse serial number, skipping"
 			    if $VERBOSE;
@@ -482,6 +538,12 @@ if ( $state == 2 ) {
 exit $exitcode;
 
 # $Log: zsu,v $
+# Revision 1.19  2004/08/04 20:43:21  andras
+# added -n option
+# updated warning text
+# strict variables
+# fixed verbose/debug interaction
+#
 # Revision 1.18  2004/03/13 08:46:54  andras
 # updated documentation: timewarp added, script categories removed indent
 # slight formatting changes
