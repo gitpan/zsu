@@ -1,0 +1,335 @@
+#!/usr/bin/perl -wi
+( $IDENT = '@(#)zsu: update DNS zone serial number' ) =~ s/^[^:]*: *//;
+#
+# edit zone file in-place
+# only update files where the SOA indicates we are authoritative
+# only update serial numbers in format (yy)yymmddn(n)
+# otherwise assume a deliberate forced zone refresh and preserve serial
+# handles timewarp (old datestamp is in future) by using future date
+#
+# Returns: 0 if success, 1 if failure
+#
+# As of 31 August 2001, this software lived at
+#     http://www.dns.net/dist/
+#
+# This software is covered by the GPL, version 2 or later.
+#
+
+( $BCMD = $0 ) =~ s/.*\///;
+( $REVISION ) = ( '$Revision: 1.16 $' =~ /[^\d\.]*([\d\.]*)/ );
+$HELPSTRING = "For help, type: $BCMD -h";
+
+$USAGE = "Usage: $BCMD [-dfLv] zone ...";
+$exitcode = 0;
+
+# parse command line arguments
+#-----------------------------
+require 'getopts.pl';
+$opt_c = $opt_d = $opt_f = $opt_h = $opt_L = $opt_v = '';
+if ( ! &Getopts('cdfhLv') ) {
+    print STDERR "$USAGE\n$HELPSTRING\n";
+    exit 2;
+}
+if ( $opt_h ) {
+    print <<EOT;
+$BCMD $REVISION: $IDENT
+$USAGE
+Update serial number of DNS zone file using (YY)YYMMDDN(N) format convention.
+ -c			change serial number format if necessary
+ -d			print debugging information
+ -f			force update, even if this host is not SOA origin
+ -L			display software license
+ -v			turn on verbose mode
+ zone ...		DNS zone files to update
+Default is to preserve the serial format and issue warnings when trying
+to update (YY)YYMMDD9 or if 99MMDDN(N) was last century.  Use -c to
+allow format changes in these situations instead.  Do not use -c if
+other programs rely on the serial format!
+
+Zones are skipped if the SOA origin does not match the local hostname;
+use -f to force updates regardless.
+EOT
+	exit 0;
+} elsif ( $opt_L ) {
+    print <<EOT;
+    Copyright 1994-2004 Andras Salamon <andras\@dns.net>
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    If you do not already have a copy of the GNU General Public License,
+    you can obtain a copy by anonymous ftp from prep.ai.mit.edu
+    (file COPYING in directory /pub/gnu) or write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+EOT
+	exit 0;
+}
+$VERBOSE = $opt_v || $DEBUG;
+$DEBUG = $opt_d;
+if ( @ARGV < 1 ) {
+    print STDERR "$USAGE\n$HELPSTRING\n";
+    exit 2;
+}
+
+
+# Set up fully qualified host name
+#---------------------------------
+# zone files must have originating host fully qualified, since information
+# from outside zone may be necessary to understand non-FQ domain names
+if ( ! $opt_f ) {
+    ( $myhost = `hostname` || `uname -n` ) =~ s/\s*$//;
+    if ( $myhost !~ /\./ ) {
+	if ( ! ( $mydom = `domainname` ) ) {
+	    warn "cannot get FQDN of host" if $VERBOSE;
+	} else {
+	    if ( $mydom !~ /^\./ ) {
+		$mydom = ".$mydom";
+	    }
+	    $myhost .= $mydom;
+	}
+    }
+    if ( $myhost !~ /\.$/ ) {
+	$myhost .= '.';
+    }
+}
+
+# warn about converting N to NN format
+#----------------------------------
+sub bump {
+    local( $o_count ) = ( @_ );
+    warn "$ARGV: converting to nn format serial" if $VERBOSE
+	&& $o_count eq '9' && $opt_c;
+    $o_count + 1;
+}
+
+# generate a sensible serial number, based on the existing one
+#
+# try to use today's date as returned by ctime(3)
+# update count if serial has today's date already
+# preserve yy format if used
+# needs to detect RFC 1982 2^31 hack!
+#----------------------------------
+
+sub generate_new {
+    local( $o_serial ) = ( @_ );
+
+    $n_serial = $o_serial;
+    # note assumption that years are in range [1900, 2199]
+    ( $o_c, $o_y, $o_m, $o_d, $o_count ) = ( $o_serial =~
+	/^(19|20|21)?(\d\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(\d\d?)$/ );
+
+    unless ( defined $o_y && defined $o_m && defined $o_d
+      && defined $o_count ) {
+	warn "$ARGV: serial $o_serial does not match heuristics, leaving as is";
+	$exitcode ++;
+    } else {
+	$o_date = $o_y.$o_m.$o_d;
+	$o_c = '' unless defined $o_c;
+	( $mday, $mon, $year ) = ( localtime( time ) )[3..5];
+	$mon ++; # change 0..11 to 1..12
+	$year += 1900 if $year < 1900; # fix 1900-offset years
+	printf STDERR "local date: %04d/%02d/%02d\n",
+	    $year, $mon, $mday if $DEBUG;
+
+	# default is to generate new yyyy format date with 0 counter
+	$n_y = $year % 100;
+	$n_c = ( $year - $n_y ) / 100;
+	$n_date = sprintf "%02d%02d%02d", $n_y, $mon, $mday;
+	$n_count = 0;
+
+	# two cases: check if counter can be bumped, if necessary
+	if ( ( $o_count =~ /\d\d/ && $o_count < 99 ) ||
+		( $o_count =~ /^\d$/ && ( $o_count < 9 || $opt_c ) ) ) {
+	    print STDERR "can bump serial\n" if $DEBUG;
+	    # try to keep yy format dates, if currently being used
+	    if ( $o_c eq '' ) {
+		print STDERR "currently using yy format dates\n" if $DEBUG;
+		if ( $n_date > $o_date ) {
+		    print STDERR "keeping yy format\n" if $DEBUG;
+		    $n_c = $o_c;
+		} elsif ( $n_date == $o_date ) {
+		    print STDERR "keeping yy format, bumping count\n"
+			if $DEBUG;
+		    ( $n_c, $n_count ) = ( $o_c, bump( $o_count ) );
+		} else {
+		    if ( $opt_c ) {
+			warn "$ARGV: converting to yyyy format serial"
+			    if $VERBOSE;
+		    } else {
+			warn "$ARGV: need -c to convert $o_serial to yyyy format, leaving as is";
+			( $n_c, $n_date, $n_count )  =
+				    ( $o_c, $o_date, $o_count );
+			$exitcode ++;
+		    }
+		}
+	    } else { # already using yyyy format
+		if ( $n_c.$n_date < $o_c.$o_date ) {
+		    # should use 2^31 hack here, see RFC 1982
+		    # for now, keep future date and bump count
+		    warn "$ARGV: serial $o_serial is in future, processing"
+			if $VERBOSE;
+		    print STDERR "$n_c,$n_date vs. $o_c,$o_date\n" if $DEBUG;
+		    ( $n_c, $n_date, $n_count )  =
+			    ( $o_c, $o_date, bump( $o_count ) );
+		} elsif ( $n_c.$n_date == $o_c.$o_date ) {
+		    print STDERR "yyyy format, bumping count\n" if $DEBUG;
+		    $n_count = bump( $o_count );
+		} # else use yyyy format
+	    }
+	} else { # can't bump counter
+	    if ( $n_c.$n_date <= $o_c.$o_date ) {
+		# problem: out of counts and zone date is too new
+		# should use 2^31 hack if new < old, see RFC 1982
+		warn "$ARGV: cannot increment $o_serial, leaving as is";
+		( $n_c, $n_date, $n_count )  =
+			    ( $o_c, $o_date, $o_count );
+		$exitcode ++;
+	    } # else use yyyy format
+	}
+	$n_serial = sprintf "%s%06d%0*d",
+	    $n_c, $n_date, ( ( $o_count =~ /^\d$/ ) ? 1 : 2 ), $n_count;
+    }
+
+    print STDERR "New serial: $n_serial\n" if $DEBUG;
+    $n_serial;
+}
+
+
+# now parse zone file
+#--------------------
+# state table:	0 looking for SOA
+#		1 found SOA, looking for serial
+#		2 found serial, looking for next file
+$state = 0;
+while ( <> ) {
+    if ( $state == 0 ) {
+	# ... SOA zone_origin  zone_contact ( serial  ...
+	# ^ $1    ^ $2       ^ $3             ^ $4  ^ $5
+	# $4 will be '' if serial is on subsequent line, see state1
+	if ( /^([^;]*\bSOA\b\s+)([^\s;]+)(\s+[^\s;]+\s+\(?\s*)([^\s;]*)(.*)/i ) {
+	    if ( $opt_f || ( $2 eq $myhost ) ) {
+		$ours = 1;
+	    } else {
+		$ours = 0;
+		$state = 2;
+	    }
+	    if ( $ours ) {
+		if ( "$4" ne '' ) {
+		    $before_serial = $1 . $2 . $3;
+		    $o_serial = $4;
+		    $after_serial = $5;
+		    if ( $o_serial !~ /^[\d.]+$/ ) {
+			warn "$ARGV: cannot parse serial number, skipping"
+			    if $VERBOSE;
+			$ours = 0;
+			$exitcode ++;
+		    } else {
+			$_ = $before_serial . &generate_new( $o_serial )
+			    . $after_serial . "\n";
+			print STDERR "--> $_ <--\n" if $DEBUG;
+		    }
+		    $state = 2;
+		} else {
+		    $state = 1;
+		}
+	    } else { # not ours, don't change
+		warn "$ARGV: origin non-local, skipping" if $VERBOSE;
+	    }
+	}
+    } elsif ( $state == 1 ) {
+	if ( ! /^\s*;/ ) { # not commented, so serial should be here
+	    if ( /^(\s*)([0-9.]+)(.*)/ ) {
+		$_ = $1 . &generate_new( $2 ) ."$3\n";
+		$state = 2;
+		print STDERR "--> $_ <--\n" if $DEBUG;
+	    } else {
+		warn "$ARGV: cannot parse SOA record, skipping" if $VERBOSE;
+		$exitcode ++;
+	    }
+	} # skip comment lines between `(' and serial
+    } elsif ( $state == 2 ) {
+	$state = 0 if eof;
+    } else {
+	die "internal error: state $state, quitting";
+    }
+} continue {
+    print;
+}
+
+if ( $state == 2 ) {
+    warn "internal error: did not detect end of last file" if $VERBOSE;
+    $exitcode ++;
+} elsif ( $state == 1 ) {
+    warn "$ARGV: could not locate serial number, skipping" if $VERBOSE;
+    $exitcode ++;
+}
+
+exit $exitcode;
+
+# $Log: zsu,v $
+# Revision 1.16  2004/02/29 20:18:57  andras
+# updated copyright date
+#
+# Revision 1.15  2002/01/22 16:03:39  andras
+# serial on same line was broken in perl5: fix from Frederic Marchand
+# ( is only needed if multiline RR, fixed
+#
+# Revision 1.14  2001/08/31 17:36:21  andras
+# added software location
+#
+# Revision 1.13  2001/08/11 22:45:02  andras
+# rewrote format handling
+# added -c option to allow silent format changes
+# changed code style
+# added more text to help
+# lots of comments
+# verbose mode now flags format changes and other useful info only
+# added -w flag and cleaned up code to avoid warnings
+#
+# Revision 1.12  1999/02/26 14:30:52  andras
+# now understands yy and yyyy formats
+# will shift yy to yyyy if y2k or if run out of nn's
+#
+# Revision 1.11  1996/04/02 10:20:43  andras
+# updated contact info
+#
+# Revision 1.10  1995/12/28  11:52:06  andras
+# perl5: quoted @'s
+#
+# Revision 1.9  1995/11/17  13:50:05  andras
+# added force option
+#
+# Revision 1.8  1995/11/17  12:49:06  andras
+# now handles yyyymmddn(n) formats also
+#
+# Revision 1.7  1995/10/27  11:19:56  andras
+# fixed multifile handling and $ours detection
+#
+# Revision 1.6  1995/10/27  10:45:06  andras
+# fixed state table; now goes back to 0 at eof
+# used to ignore second and subsequent files
+#
+# Revision 1.5  1995/05/15  16:16:23  andras
+# fixed hstname typo
+#
+# Revision 1.4  1995/05/09  00:38:34  andras
+# added in command line processing
+#
+# Revision 1.3  1995/05/08  20:45:59  andras
+# now supposed to understand a fairly general zone format
+# tested OK on standard format primary
+# tested OK on easy secondary
+# tested OK on secondary with serial in future
+#
+# Revision 1.2  1995/04/26  07:52:57  andras
+# cleaner logic
+#
+# Revision 1.1  1994/10/25  10:13:47  andras
+# Initial revision
+#
